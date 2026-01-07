@@ -13,6 +13,11 @@ import javafx.scene.shape.Circle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.effect.DropShadow;
+import javafx.collections.FXCollections;
+import javafx.scene.control.ComboBox;
+import javafx.scene.shape.Rectangle;
+import javafx.scene.control.Tooltip;
+import java.time.DayOfWeek;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -30,6 +35,12 @@ public class DashboardController {
     private String weeklyMoodEmoji = "😐";
     private Map<LocalDate, Boolean> last7DaysActivity = new HashMap<>();
     private List<Entry> recentEntries = new ArrayList<>(); // New List for preview
+    private Map<LocalDate, String> moodHistory = new HashMap<>();
+    private Set<Integer> availableYears = new HashSet<>();
+    private int selectedYear = LocalDate.now().getYear();
+
+    private GridPane graphGrid;
+    private ComboBox<Integer> yearSelector;
 
     public void setOnWriteNow(Runnable action) {
         this.onWriteNow = action;
@@ -108,18 +119,46 @@ public class DashboardController {
                 createTotalCard() // NEW CARD
         );
 
-        // Recent Activity
-        VBox recentSection = new VBox(15);
-        Label recentTitle = new Label("Recent Activity");
-        recentTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-        recentTitle.setTextFill(Color.web("#2d3436"));
+        // --- NEW GRAPH SECTION ---
+        VBox graphSection = new VBox(15);
 
-        VBox recentList = createRecentActivityList();
-        recentSection.getChildren().addAll(recentTitle, recentList);
+        // Header: Title + Year Selector
+        HBox graphHeader = new HBox(15);
+        graphHeader.setAlignment(Pos.CENTER_LEFT);
+
+        Label graphTitle = new Label("Mood Activity");
+        graphTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
+        graphTitle.setTextFill(Color.web("#2d3436"));
+
+        Region graphSpacer = new Region();
+        HBox.setHgrow(graphSpacer, Priority.ALWAYS);
+
+        // Create Year Selector
+        yearSelector = new ComboBox<>();
+        yearSelector.setStyle("-fx-font-size: 14px; -fx-background-color: white; -fx-border-color: #dfe6e9; -fx-border-radius: 5;");
+
+        // Fill selector with data found in calculateRealData
+        updateYearSelectorItems();
+        yearSelector.setValue(selectedYear);
+
+        // Action: Redraw graph when year changes
+        yearSelector.setOnAction(e -> {
+            if (yearSelector.getValue() != null) {
+                selectedYear = yearSelector.getValue();
+                drawCalendarGraph(selectedYear);
+            }
+        });
+
+        graphHeader.getChildren().addAll(graphTitle, graphSpacer, new Label("Year: "), yearSelector);
+
+        // Create the Graph Container and Draw Initial Data
+        VBox moodGraphContainer = createMoodGraph();
+        drawCalendarGraph(selectedYear);
+
+        graphSection.getChildren().addAll(graphHeader, moodGraphContainer);
 
         // Assemble Final View
-        mainLayout.getChildren().addAll(headerRow, statsContainer, recentSection);
-
+        mainLayout.getChildren().addAll(headerRow, statsContainer, graphSection);
         // Add a ScrollPane in case the history gets long (Optional, but good for safety)
         ScrollPane scrollPane = new ScrollPane(mainLayout);
         scrollPane.setFitToWidth(true);
@@ -156,12 +195,27 @@ public class DashboardController {
         List<LocalDate> dates = new ArrayList<>();
         List<String> recentMoods = new ArrayList<>();
 
+        // Initialize available years with current year so it's never empty
+        availableYears.clear();
+        availableYears.add(LocalDate.now().getYear());
+        moodHistory.clear();
+
         for (Entry e : entries) {
             LocalDate d = e.getDate();
             dates.add(d);
+
+            // Save mood and year
+            moodHistory.put(d, e.getMood());
+            availableYears.add(d.getYear());
+
             if (d.isAfter(LocalDate.now().minusDays(7))) {
                 recentMoods.add(e.getMood());
             }
+        }
+
+        // Update the dropdown if it exists
+        if (yearSelector != null) {
+            updateYearSelectorItems();
         }
 
         calculateStreak(dates);
@@ -325,7 +379,6 @@ public class DashboardController {
         card.setPrefHeight(140);
         card.setStyle("-fx-background-color: white; -fx-background-radius: 15;");
 
-        // JavaFX DropShadow Effect
         DropShadow shadow = new DropShadow();
         shadow.setColor(Color.rgb(0, 0, 0, 0.1));
         shadow.setRadius(15);
@@ -335,55 +388,164 @@ public class DashboardController {
         return card;
     }
 
-    // Recent Activities List
-    private VBox createRecentActivityList() {
-        VBox list = new VBox(10);
+    // Method for graph
+    private void updateYearSelectorItems() {
+        if (yearSelector == null) return;
+        List<Integer> sortedYears = new ArrayList<>(availableYears);
+        sortedYears.sort(Collections.reverseOrder()); // Newest first
+        yearSelector.setItems(FXCollections.observableArrayList(sortedYears));
+    }
 
-        if (recentEntries.isEmpty()) {
-            Label empty = new Label("No recent activity. Start writing!");
-            empty.setTextFill(Color.GRAY);
-            list.getChildren().add(empty);
-            return list;
+    private VBox createMoodGraph() {
+        VBox container = new VBox(15);
+        container.setPadding(new Insets(20));
+        container.setStyle("-fx-background-color: white; -fx-background-radius: 15; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.05), 10, 0, 0, 5);");
+
+        // Wrapper: Holds Fixed Labels (Left) + Scrollable Graph (Right)
+        container.setMinHeight(250);
+        HBox graphWrapper = new HBox(10);
+        graphWrapper.setAlignment(Pos.TOP_LEFT);
+
+        // Define Grid Rules
+        RowConstraints headerRowConstraint = new RowConstraints(15);
+        headerRowConstraint.setValignment(javafx.geometry.VPos.BOTTOM);
+
+        // Rule 2: Day Rows (The Pixels) - Fixed height 12px (matches rectangle height)
+        RowConstraints dayRowConstraint = new RowConstraints(12);
+        dayRowConstraint.setValignment(javafx.geometry.VPos.CENTER);
+
+        // Fixed Day Labels
+        GridPane labelsGrid = new GridPane();
+        labelsGrid.setVgap(7);
+        labelsGrid.setPadding(new Insets(0, 5, 0, 0));
+        labelsGrid.setMinWidth(30); // Prevent shrinking
+
+        // Apply Rules to Left Grid
+        labelsGrid.getRowConstraints().add(headerRowConstraint); // Row 0
+        for (int i = 0; i < 7; i++) labelsGrid.getRowConstraints().add(dayRowConstraint); // Rows 1-7
+
+        // Invisible Spacer for Row 0
+        Label spacer = new Label("Jan");
+        spacer.setFont(Font.font("Segoe UI", 10));
+        spacer.setVisible(false);
+        labelsGrid.add(spacer, 0, 0);
+
+        // Add Day Labels (Sun to Sat) with vertical centering
+        String[] days = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+        for (int i = 0; i < 7; i++) {
+            Label lbl = new Label(days[i]);
+            lbl.setFont(Font.font("Segoe UI", 10));
+            lbl.setTextFill(Color.web("#b2bec3"));
+            // Ensure the text itself is centered in its 12px slot
+            lbl.setMaxHeight(Double.MAX_VALUE);
+            lbl.setAlignment(Pos.CENTER_LEFT);
+            labelsGrid.add(lbl, 0, i + 1);
         }
 
-        for (Entry e : recentEntries) {
-            HBox row = new HBox(15);
-            row.setPadding(new Insets(15));
-            row.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-border-color: #f1f2f6; -fx-border-radius: 10;");
-            row.setAlignment(Pos.CENTER_LEFT);
+        // Scroll Graph
+        graphGrid = new GridPane();
+        graphGrid.setHgap(7);
+        graphGrid.setVgap(7);
+        graphGrid.setAlignment(Pos.TOP_LEFT);
+        graphGrid.setPadding(new Insets(0, 0, 20, 0)); // Add 20px of buffer
 
-            // Date Badge
-            VBox dateBox = new VBox();
-            dateBox.setAlignment(Pos.CENTER);
-            dateBox.setPrefWidth(50);
-            Label dayNum = new Label(String.valueOf(e.getDate().getDayOfMonth()));
-            dayNum.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-            dayNum.setTextFill(Color.web("#2d3436"));
-            Label month = new Label(e.getDate().format(DateTimeFormatter.ofPattern("MMM")).toUpperCase());
-            month.setFont(Font.font("Segoe UI", 10));
-            month.setTextFill(Color.GRAY);
-            dateBox.getChildren().addAll(dayNum, month);
+        graphGrid.getRowConstraints().add(headerRowConstraint); // Row 0
+        for (int i = 0; i < 7; i++) graphGrid.getRowConstraints().add(dayRowConstraint); // Rows 1-7
 
-            // Content Preview
-            VBox contentBox = new VBox(5);
-            Label contentText = new Label(e.getContent());
-            contentText.setFont(Font.font("Segoe UI", 14));
-            contentText.setTextFill(Color.web("#2d3436"));
-            contentText.setWrapText(false); // One line only
-            // Truncate text if too long
-            if (e.getContent().length() > 60) {
-                contentText.setText(e.getContent().substring(0, 60) + "...");
+        ScrollPane gridScrollPane = new ScrollPane(graphGrid);
+        gridScrollPane.setFitToHeight(true);
+        gridScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        gridScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        gridScrollPane.setMinHeight(160);
+        gridScrollPane.setStyle("-fx-background-color: transparent; -fx-background: transparent;");
+
+        HBox.setHgrow(labelsGrid, Priority.NEVER);
+        HBox.setHgrow(gridScrollPane, Priority.ALWAYS);
+
+        graphWrapper.getChildren().addAll(labelsGrid, gridScrollPane);
+        container.getChildren().addAll(graphWrapper, createLegend());
+        return container;
+    }
+
+    private void drawCalendarGraph(int year) {
+        if (graphGrid == null) return;
+        graphGrid.getChildren().clear(); // Reset grid
+
+        LocalDate start = LocalDate.of(year, 1, 1);
+        LocalDate end = LocalDate.of(year, 12, 31);
+
+        // Variables to track grid positioning
+        int column = 0;
+        LocalDate cursor = start;
+        java.time.Month currentMonth = null;
+
+        while (!cursor.isAfter(end)) {
+            int dayOfWeek = cursor.getDayOfWeek().getValue();
+            int row = (dayOfWeek == 7) ? 0 : dayOfWeek;
+
+            if (cursor.getMonth() != currentMonth) {
+                currentMonth = cursor.getMonth();
+                // Only draw if not too close to the right edge
+                if (column < 51) {
+                    Label monthLabel = new Label(currentMonth.getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH));
+                    monthLabel.setFont(Font.font("Segoe UI", 10));
+                    monthLabel.setTextFill(Color.GRAY);
+
+                    graphGrid.add(monthLabel, column, 0);
+                    GridPane.setColumnSpan(monthLabel, 2);
+                }
             }
 
-            Label meta = new Label(e.getMood() + " • " + e.getWeather());
-            meta.setFont(Font.font("Segoe UI", 10));
-            meta.setTextFill(Color.web("#b2bec3"));
+            Rectangle rect = new Rectangle(12, 12);
+            rect.setArcWidth(3); rect.setArcHeight(3);
 
-            contentBox.getChildren().addAll(contentText, meta);
+            String mood = moodHistory.getOrDefault(cursor, "No Data");
+            rect.setFill(getColorForMood(mood));
 
-            row.getChildren().addAll(dateBox, contentBox);
-            list.getChildren().add(row);
+            Tooltip.install(rect, new Tooltip(cursor.format(DateTimeFormatter.ofPattern("MMM d, yyyy")) + "\n" + mood));
+            graphGrid.add(rect, column, row + 1);
+            if (row == 6) {
+                column++;
+            }
+            cursor = cursor.plusDays(1);
         }
-        return list;
+    }
+
+    private Color getColorForMood(String mood) {
+        if (mood == null || mood.equals("No Data")) return Color.web("#ebedf0");
+        String lower = mood.toLowerCase();
+
+        if (lower.contains("very positive")) return Color.web("#2ecc71");      // Green
+        else if (lower.contains("very negative")) return Color.web("#e74c3c"); // Red
+        else if (lower.contains("positive")) return Color.web("#3498db");      // Blue
+        else if (lower.contains("negative")) return Color.web("#fd79a8");      // Pink
+        else if (lower.contains("neutral")) return Color.web("#f1c40f");       // Yellow
+        return Color.web("#ebedf0");
+    }
+
+    private HBox createLegend() {
+        HBox legend = new HBox(15);
+        legend.setAlignment(Pos.CENTER_RIGHT);
+        legend.setPadding(new Insets(10, 0, 0, 0));
+
+        legend.getChildren().add(createLegendItem("Very +ve", "#2ecc71"));
+        legend.getChildren().add(createLegendItem("Positive", "#3498db"));
+        legend.getChildren().add(createLegendItem("Neutral", "#f1c40f"));
+        legend.getChildren().add(createLegendItem("Negative", "#fd79a8"));
+        legend.getChildren().add(createLegendItem("Very -ve", "#e74c3c"));
+        legend.getChildren().add(createLegendItem("No Data", "#ebedf0"));
+        return legend;
+    }
+
+    private HBox createLegendItem(String text, String colorHex) {
+        HBox item = new HBox(5);
+        item.setAlignment(Pos.CENTER);
+        Rectangle box = new Rectangle(10, 10, Color.web(colorHex));
+        box.setArcWidth(2); box.setArcHeight(2);
+        Label lbl = new Label(text);
+        lbl.setFont(Font.font("Segoe UI", 10));
+        lbl.setTextFill(Color.GRAY);
+        item.getChildren().addAll(box, lbl);
+        return item;
     }
 }
