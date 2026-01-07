@@ -119,17 +119,13 @@ public class DashboardController {
                 createTotalCard() // NEW CARD
         );
 
-        // --- NEW GRAPH SECTION ---
         VBox graphSection = new VBox(15);
-
-        // Header: Title + Year Selector
+        // Title and year
         HBox graphHeader = new HBox(15);
         graphHeader.setAlignment(Pos.CENTER_LEFT);
-
         Label graphTitle = new Label("Mood Activity");
         graphTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
         graphTitle.setTextFill(Color.web("#2d3436"));
-
         Region graphSpacer = new Region();
         HBox.setHgrow(graphSpacer, Priority.ALWAYS);
 
@@ -150,7 +146,6 @@ public class DashboardController {
         });
 
         graphHeader.getChildren().addAll(graphTitle, graphSpacer, new Label("Year: "), yearSelector);
-
         // Create the Graph Container and Draw Initial Data
         VBox moodGraphContainer = createMoodGraph();
         drawCalendarGraph(selectedYear);
@@ -174,21 +169,25 @@ public class DashboardController {
 
     // Calculate Data
     private void calculateRealData() {
+        currentStreak = 0;
+        totalEntriesCount = 0;
+        weeklyMoodText = "No Data";
+        weeklyMoodEmoji = "😐";
+        last7DaysActivity.clear();
+        recentEntries.clear();
+        moodHistory.clear();
+        availableYears.clear();
+        availableYears.add(LocalDate.now().getYear());
+
         if (!Session.hasActiveUser()) return;
-
         ArrayList<Entry> entries = Session.listEntries();
-
         if (entries == null || entries.isEmpty()) {
             return;
         }
 
         // Sort entries by Date (Newest first)
         entries.sort((e1, e2) -> e2.getDate().compareTo(e1.getDate()));
-
-        // Total Count
         totalEntriesCount = entries.size();
-
-        // Recent List
         recentEntries = entries.stream().limit(3).collect(Collectors.toList());
 
         // Streak & Mood Logic
@@ -203,8 +202,6 @@ public class DashboardController {
         for (Entry e : entries) {
             LocalDate d = e.getDate();
             dates.add(d);
-
-            // Save mood and year
             moodHistory.put(d, e.getMood());
             availableYears.add(d.getYear());
 
@@ -230,7 +227,6 @@ public class DashboardController {
         for (int i = 0; i < 7; i++) {
             last7DaysActivity.put(LocalDate.now().minusDays(i), uniqueDates.contains(LocalDate.now().minusDays(i)));
         }
-
         if (!uniqueDates.isEmpty()) {
             LocalDate cursor = LocalDate.now();
             if (uniqueDates.contains(cursor)) {
@@ -316,7 +312,6 @@ public class DashboardController {
         return card;
     }
 
-    // Mood Card
     private VBox createMoodCard() {
         VBox card = createBaseCard();
         card.setPrefWidth(200);
@@ -332,8 +327,6 @@ public class DashboardController {
 
         icon.setPadding(new Insets(10,0,10,0));
         icon.setAlignment(Pos.CENTER);
-
-        // The Mood Text
         Label text = new Label(weeklyMoodText);
         text.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
 
@@ -351,7 +344,6 @@ public class DashboardController {
         return card;
     }
 
-    // New Total Card
     private VBox createTotalCard() {
         VBox card = createBaseCard();
         card.setPrefWidth(200);
@@ -388,7 +380,6 @@ public class DashboardController {
         return card;
     }
 
-    // Method for graph
     private void updateYearSelectorItems() {
         if (yearSelector == null) return;
         List<Integer> sortedYears = new ArrayList<>(availableYears);
@@ -406,11 +397,10 @@ public class DashboardController {
         HBox graphWrapper = new HBox(10);
         graphWrapper.setAlignment(Pos.TOP_LEFT);
 
-        // Define Grid Rules
         RowConstraints headerRowConstraint = new RowConstraints(15);
         headerRowConstraint.setValignment(javafx.geometry.VPos.BOTTOM);
 
-        // Rule 2: Day Rows (The Pixels) - Fixed height 12px (matches rectangle height)
+        // Fixed height
         RowConstraints dayRowConstraint = new RowConstraints(12);
         dayRowConstraint.setValignment(javafx.geometry.VPos.CENTER);
 
@@ -420,7 +410,6 @@ public class DashboardController {
         labelsGrid.setPadding(new Insets(0, 5, 0, 0));
         labelsGrid.setMinWidth(30); // Prevent shrinking
 
-        // Apply Rules to Left Grid
         labelsGrid.getRowConstraints().add(headerRowConstraint); // Row 0
         for (int i = 0; i < 7; i++) labelsGrid.getRowConstraints().add(dayRowConstraint); // Rows 1-7
 
@@ -430,7 +419,6 @@ public class DashboardController {
         spacer.setVisible(false);
         labelsGrid.add(spacer, 0, 0);
 
-        // Add Day Labels (Sun to Sat) with vertical centering
         String[] days = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
         for (int i = 0; i < 7; i++) {
             Label lbl = new Label(days[i]);
@@ -442,7 +430,6 @@ public class DashboardController {
             labelsGrid.add(lbl, 0, i + 1);
         }
 
-        // Scroll Graph
         graphGrid = new GridPane();
         graphGrid.setHgap(7);
         graphGrid.setVgap(7);
